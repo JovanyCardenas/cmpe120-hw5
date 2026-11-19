@@ -1,0 +1,11 @@
+Total Cycles: 57
+Instructions Executed: 39
+CPI: 1.461538
+IPC: 0.684211
+Conditional Branches: 8
+Branch Mispredictions: 3
+Branch Prediction Accuracy: 62.500000
+BTB Lookups: 18
+BTB Hits: 12
+BTB Hit Rate: 66.666667
+Control Mispredictions: 7
