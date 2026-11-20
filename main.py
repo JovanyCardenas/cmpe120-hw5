@@ -47,19 +47,36 @@ class GSharePredictor(object):
 
     def __init__(self):
         # TODO: create the counter table and history register.
-        raise NotImplementedError("GSharePredictor.__init__")
+        # raise NotImplementedError("GSharePredictor.__init__")
+
+        self.counters = [GSHARE_INITIAL_COUNTER] * GSHARE_ENTRIES
+        self.history = 0
 
     def index(self, pc):
         # TODO: return the gshare table index for pc.
-        raise NotImplementedError("GSharePredictor.index")
+        # raise NotImplementedError("GSharePredictor.index")
+
+        # Using provided formula
+        return ((pc >> 2) ^ self.history) & GSHARE_INDEX_MASK
 
     def predict(self, pc):
         # TODO: return (predicted_taken, index) for pc.
-        raise NotImplementedError("GSharePredictor.predict")
+        # raise NotImplementedError("GSharePredictor.predict")
+
+        index = self.index(pc)
+        predicted_taken = self.counters[index] >= GSHARE_TAKEN_THRESHOLD
+        return predicted_taken, index
 
     def update(self, index, taken):
         # TODO: update the counter at index and the global history.
-        raise NotImplementedError("GSharePredictor.update")
+        # raise NotImplementedError("GSharePredictor.update")
+
+        if taken:
+            self.counters[index] = min(3, self.counters[index] + 1)
+        else:
+            self.counters[index] = max(0, self.counters[index] - 1)
+
+        self.history = ((self.history << 1) | int(taken)) & GSHARE_HISTORY_MASK
 
 
 class BTB(object):
@@ -67,24 +84,43 @@ class BTB(object):
 
     def __init__(self):
         # TODO: create the valid, tag, and target arrays.
-        raise NotImplementedError("BTB.__init__")
+        # raise NotImplementedError("BTB.__init__")
+
+        self.valid = [False] * BTB_ENTRIES
+        self.tags = [0] * BTB_ENTRIES
+        self.targets = [0] * BTB_ENTRIES
 
     def index(self, pc):
         # TODO: return the BTB index for pc.
-        raise NotImplementedError("BTB.index")
+        # raise NotImplementedError("BTB.index")
+
+        return (pc >> 2) & BTB_INDEX_MASK
 
     def tag(self, pc):
         # TODO: return the BTB tag for pc.
-        raise NotImplementedError("BTB.tag")
+        # raise NotImplementedError("BTB.tag")
+
+        return (pc >> 8) & 0xFFFFFF
 
     def lookup(self, pc):
         # TODO: return (hit, target). A miss returns a None target.
-        raise NotImplementedError("BTB.lookup")
+        # raise NotImplementedError("BTB.lookup")
+
+        index = self.index(pc)
+
+        if self.valid[index] and self.tags[index] == self.tag(pc):
+            return True, self.targets[index]
+
+        return False, None
 
     def update(self, pc, target):
         # TODO: install pc -> target in the BTB.
-        raise NotImplementedError("BTB.update")
+        # raise NotImplementedError("BTB.update")
 
+        index = self.index(pc)
+        self.valid[index] = True
+        self.tags[index] = self.tag(pc)
+        self.targets[index] = target & MASK32
 
 class InsMem(object):
     def __init__(self, io_dir):
@@ -101,7 +137,20 @@ class InsMem(object):
         if ReadAddress < 0 or ReadAddress + 4 > len(self.bytes):
             return 0
         # TODO: Return the 32-bit instruction at byte address ReadAddress.
-        raise NotImplementedError("InsMem.readInstr")
+        # raise NotImplementedError("InsMem.readInstr")
+
+        """ Turns 4 bytes
+                00000000
+                00000001
+                00000000
+                10010011
+
+                into one 32-bit instruction
+                00000000000100000000000010010011 
+                """
+
+        instruction = "".join(self.bytes[ReadAddress:ReadAddress + 4])
+        return int(instruction, 2)
 
 
 class DataMem(object):
@@ -117,7 +166,19 @@ class DataMem(object):
         Bytes that fall outside the memory read as 0.
         """
         # TODO: Return the 32-bit word at byte address ReadAddress.
-        raise NotImplementedError("DataMem.readDataMem")
+        # raise NotImplementedError("DataMem.readDataMem")
+        """ Read 4 bytes from memory
+                << 8 shifts existing value left by 8 bits
+                | byte combines the value with the next byte
+                """
+
+        value = 0
+        for i in range(4):
+            address = ReadAddress + i
+            byte = self.image[address] if 0 <= address < MEM_SIZE else 0
+            value = (value << 8) | byte
+
+        return value
 
     def writeDataMem(self, Address, WriteData):
         """Write the low 32 bits of ``WriteData`` at byte address ``Address``.
@@ -125,7 +186,18 @@ class DataMem(object):
         Bytes that fall outside the memory are silently dropped.
         """
         # TODO: Store WriteData at byte address Address.
-        raise NotImplementedError("DataMem.writeDataMem")
+        # raise NotImplementedError("DataMem.writeDataMem")
+
+        # Breaking 32-bit number into four separate bytes
+        # & 0xFF extracts one byte at a time
+
+        WriteData = WriteData & MASK32
+
+        for i in range(4):
+            address = Address + i
+            if 0 <= address < MEM_SIZE:
+                shift = 8 * (3 - i)
+                self.image[address] = (WriteData >> shift) & 0xFF
 
     def outputDataMem(self):
         with open(os.path.join(self.io_dir, "DMEMResult.txt"), "w") as fh:
@@ -141,7 +213,9 @@ class RegisterFile(object):
     def readRF(self, Reg_addr):
         """Return the 32-bit value of register ``Reg_addr``."""
         # TODO: Return the value held in register Reg_addr.
-        raise NotImplementedError("RegisterFile.readRF")
+        # raise NotImplementedError("RegisterFile.readRF")
+
+        return self.regs[Reg_addr]
 
     def writeRF(self, Reg_addr, Wrt_reg_data):
         """Write the low 32 bits of ``Wrt_reg_data`` to register ``Reg_addr``.
@@ -149,7 +223,10 @@ class RegisterFile(object):
         x0 is hardwired to zero, so writes to it are discarded.
         """
         # TODO: Store Wrt_reg_data in register Reg_addr. Writes to x0 are ignored.
-        raise NotImplementedError("RegisterFile.writeRF")
+        # raise NotImplementedError("RegisterFile.writeRF")
+
+        if Reg_addr != 0:
+            self.regs[Reg_addr] = Wrt_reg_data & MASK32
 
     def outputRF(self):
         with open(os.path.join(self.io_dir, "RFResult.txt"), "w") as fh:
@@ -167,9 +244,9 @@ class State(object):
 
     def __init__(self):
         self.IF = {"nop": False, "PC": 0}
-        self.ID = {"nop": True, "PC": 0}
-        self.EX = {"nop": True, "PC": 0}
-        self.MEM = {"nop": True, "PC": 0}
+        self.ID = {"nop": True, "PC": 0, "op": ""}
+        self.EX = {"nop": True, "PC": 0, "op": ""}
+        self.MEM = {"nop": True, "PC": 0, "op": ""}
         self.WB = {"nop": True, "PC": 0}
 
 
@@ -276,6 +353,109 @@ class Core(object):
             fh.write("\n".join(lines) + "\n")
         print("\n".join(lines))
 
+def sign_extend(value, bits):
+    if value & (1 << (bits - 1)):
+        return value - (1 << bits)
+
+    return value
+
+def alu(op, a, b):
+    if op == "ADD":
+        return (a + b) & MASK32
+    elif op == "SUB":
+        return (a - b) & MASK32
+    elif op == "AND":
+        return a & b
+    elif op == "OR":
+        return a | b
+    elif op == "XOR":
+        return a ^ b
+
+    return 0
+
+def decode(word):
+    # Extract instruction fields
+    opcode = word & 0x7F
+    rd = (word >> 7) & 0x1F
+    funct3 = (word >> 12) & 0x7
+    rs1 = (word >> 15) & 0x1F
+    rs2 = (word >> 20) & 0x1F
+    funct7 = (word >> 25) & 0x7F
+
+    imm = sign_extend(word >> 20, 12)
+
+    alu_ops = {
+        0: "ADD",
+        4: "XOR",
+        6: "OR",
+        7: "AND"
+    }
+
+    # Decode arithmetic and memory instructions
+    if opcode == 0x33:
+        if funct3 == 0 and funct7 == 0x20:
+            op = "SUB"
+        else:
+            op = alu_ops[funct3]
+
+    elif opcode == 0x13:
+        op = alu_ops[funct3]
+        rs2 = None
+
+    elif opcode == 0x03:
+        op = "LW"
+        rs2 = None
+
+    elif opcode == 0x23:
+        op = "SW"
+        imm = sign_extend((funct7 << 5) | rd, 12)
+        rd = 0
+
+    # Decode Branches and Jumps
+    elif opcode == 0x63:
+        op = "BEQ" if funct3 == 0 else "BNE"
+
+        imm = sign_extend(
+            ((word >> 31) << 12)
+            | (((word >> 7) & 1) << 11)
+            | (((word >> 25) & 0x3F) << 5)
+            | (((word >> 8) & 0xF) << 1),
+            13
+        )
+
+        rd = 0
+
+    elif opcode == 0x6F:
+        op = "JAL"
+
+        imm = sign_extend(
+            ((word >> 31) << 20)
+            | (((word >> 12) & 0xFF) << 12)
+            | (((word >> 20) & 1) << 11)
+            | (((word >> 21) & 0x3FF) << 1),
+            21
+        )
+
+        rs1 = None
+        rs2 = None
+
+    elif opcode == 0x67:
+        op = "JALR"
+        rs2 = None
+
+    else:
+        op = "NOP"
+        rd = 0
+        rs1 = None
+        rs2 = None
+
+    return {
+        "op": op,
+        "rd": rd,
+        "rs1": rs1,
+        "rs2": rs2,
+        "imm": imm
+    }
 
 class FiveStageCore(Core):
     """5-stage pipeline with forwarding, load-use stall, BTB, and gshare."""
@@ -305,8 +485,199 @@ class FiveStageCore(Core):
         # --------------------- EX stage ---------------------
         # --------------------- ID stage ---------------------
         # --------------------- IF stage ---------------------
-        raise NotImplementedError("FiveStageCore.step")
+        # raise NotImplementedError("FiveStageCore.step")
 
+        s = self.state # Current pipeline stage
+        n = State() # Next clock cycle's state
+        self.flush_if_id = False # Whether a control misprediction occurred
+        self.redirect_pc = None # stores correct destination after misprediction
+
+        # --------------------- WB stage ---------------------
+
+        if not s.WB["nop"]:
+            self.myRF.writeRF(s.WB["rd"], s.WB["result"])
+            self.instructions_executed += 1
+
+        # --------------------- MEM stage --------------------
+
+        if not s.MEM["nop"]:
+            m = s.MEM
+            result = m["result"]
+
+            if m["op"] == "LW":
+                result = self.dmem.readDataMem(result)
+
+            elif m["op"] == "SW":
+                self.dmem.writeDataMem(result, m["store_data"])
+
+            n.WB = {
+                "nop": False,
+                "PC": m["PC"],
+                "rd": m["rd"],
+                "result": result,
+            }
+
+        # --------------------- EX stage ---------------------
+
+        if not s.EX["nop"]:
+            e = s.EX
+            op = e["op"]
+            pc = e["PC"]
+
+            def forwarded(reg):
+                if reg is None or reg == 0:
+                    return 0
+
+                if not s.MEM["nop"] and s.MEM["rd"] == reg:
+                    if s.MEM["op"] != "LW":
+                        return s.MEM["result"]
+
+                if not s.WB["nop"] and s.WB["rd"] == reg:
+                    return s.WB["result"]
+
+                return self.myRF.readRF(reg)
+
+            a = forwarded(e["rs1"])
+            b = forwarded(e["rs2"])
+            result = 0
+
+            if op in ("LW", "SW"):
+                result = (a + e["imm"]) & MASK32
+            elif op in ("BEQ", "BNE", "JAL", "JALR"):
+                conditional = op in ("BEQ", "BNE")
+
+                if op == "BEQ":
+                    taken = a == b
+                elif op == "BNE":
+                    taken = a != b
+                else:
+                    taken = True
+
+                actual = pc + 4
+
+                if taken:
+                    if op == "JALR":
+                        actual = (a + e["imm"]) & ~1
+                    else:
+                        actual = pc + e["imm"]
+
+                actual &= MASK32
+
+                if conditional:
+                    self.conditional_branches += 1
+
+                    if taken != e["predicted_taken"]:
+                        self.branch_mispredictions += 1
+
+                    self.predictor.update(
+                        e["gshare_index"], taken
+                    )
+
+                else:
+                    result = (pc + 4) & MASK32
+
+                self.btb_lookups += 1
+
+                if e["btb_hit"]:
+                    self.btb_hits += 1
+                if taken:
+                    self.btb.update(pc, actual)
+
+                if actual != e["predicted_pc"]:
+                    self.control_mispredictions += 1
+                    self.flush_if_id = True
+                    self.redirect_pc = actual
+
+            else:
+                operand = e["imm"] if e["rs2"] is None else b
+                result = alu(op, a, operand)
+
+            n.MEM = {
+                "nop": False,
+                "PC": pc,
+                "op": op,
+                "rd": e["rd"],
+                "result": result,
+                "store_data": b,
+            }
+
+        # --------------------- ID stage ---------------------
+
+        stall = False
+
+        if not self.flush_if_id and not s.ID["nop"]:
+            d = s.ID
+
+            if not s.EX["nop"] and s.EX["op"] == "LW":
+                if s.EX["rd"] != 0:
+                    stall = s.EX["rd"] in (d["rs1"], d["rs2"])
+
+            if stall:
+                n.ID = d.copy()
+            else:
+                n.EX = d.copy()
+
+        # --------------------- IF stage ---------------------
+
+        if self.flush_if_id:
+            self.halt_fetched = False
+            n.IF = {
+                "nop": False,
+                "PC": self.redirect_pc
+            }
+
+        elif stall:
+            n.IF = s.IF.copy()
+
+        elif s.IF["nop"]:
+            n.IF = s.IF.copy()
+
+        else:
+            pc = s.IF["PC"]
+            word = self.imem.readInstr(pc)
+
+            if word == HALT_INSTR or word == 0:
+                self.halt_fetched = True
+                n.IF = {"nop": True, "PC": pc}
+
+            else:
+                d = decode(word)
+
+                predicted_pc = (pc + 4) & MASK32
+                predicted_taken = False
+                index = None
+                hit = False
+
+                # Predict control instructions:
+                if d["op"] in ("BEQ", "BNE", "JAL", "JALR"):
+
+                    if d["op"] in ("BEQ", "BNE"):
+                        predicted_taken, index = self.predictor.predict(pc)
+                    else:
+                        predicted_taken = True
+
+                    hit, target = self.btb.lookup(pc)
+
+                    if predicted_taken and hit:
+                        predicted_pc = target
+
+                # Pass the instruction to ID
+                n.ID = {
+                    "nop": False,
+                    "PC": pc,
+                    **d,
+                    "predicted_pc": predicted_pc,
+                    "predicted_taken": predicted_taken,
+                    "gshare_index": index,
+                    "btb_hit": hit
+                }
+
+                n.IF = {
+                    "nop": False,
+                    "PC": predicted_pc
+                }
+        self.nextState = n
+        self.state = n
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
